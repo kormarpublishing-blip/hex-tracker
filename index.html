@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hexen Legend - Desktop & Interactive Export</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .map-viewport {
+            position: relative;
+            cursor: crosshair;
+            overflow: auto;
+            max-height: 75vh;
+            border: 4px solid #1e293b;
+            background: #0f172a;
+            border-radius: 12px;
+        }
+        #map-img { display: block; max-width: none; user-select: none; }
+        .hex-pin {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            border: 2px solid white;
+            clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 800;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 10;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+            transition: all 0.2s;
+        }
+        .hex-pin:hover { transform: translate(-50%, -50%) scale(1.2); z-index: 20; box-shadow: 0 0 15px rgba(255,255,255,0.5); }
+        
+        .cat-myths { background: #a855f7; }    
+        .cat-holdings { background: #3b82f6; } 
+        .cat-dwellings { background: #10b981; }
+        .cat-sanctums { background: #06b6d4; } 
+        .cat-monuments { background: #f59e0b; }
+        .cat-hazards { background: #f97316; }  
+        .cat-curses { background: #ef4444; }   
+        .cat-ruins { background: #71717a; }    
+
+        .row-highlight { animation: highlight 2s ease-out; }
+        @keyframes highlight {
+            0% { background-color: rgba(245, 158, 11, 0.4); }
+            100% { background-color: transparent; }
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        input, textarea, select { border: none !important; outline: none !important; }
+        
+        .export-only { display: none; }
+        .is-export .no-export { display: none !important; }
+        .is-export .export-only { display: block; }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans pb-20">
+
+    <div id="main-container" class="max-w-6xl mx-auto p-6">
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 border-b border-slate-800 pb-6">
+            <div>
+                <h1 class="text-3xl font-black text-amber-500 tracking-tighter uppercase italic">Hexen Legend</h1>
+                <p class="text-slate-400 text-sm">Interactive Campaign Map. Progress is saved automatically.</p>
+            </div>
+            <div class="flex gap-3 no-export flex-wrap justify-center">
+                <button id="open-library" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm font-bold transition-all text-slate-200 border border-slate-700">
+                    Map Library
+                </button>
+                <label class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg cursor-pointer border border-slate-700 transition-all text-sm font-bold">
+                    Change Map Image
+                    <input type="file" id="map-upload" accept="image/*" class="hidden">
+                </label>
+                <button id="export-html" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-bold transition-all text-white shadow-lg">
+                    Export Interactive
+                </button>
+                <button id="clear-all" class="bg-red-950/30 hover:bg-red-900/50 px-4 py-2 rounded-lg text-sm font-bold transition-all text-red-400 border border-red-900/50">
+                    New Map
+                </button>
+            </div>
+        </header>
+
+        <div id="map-area" class="hidden mb-12">
+            <div class="flex items-center gap-4 mb-4 no-export">
+                <input type="text" id="map-title-input" placeholder="Untitled Campaign..." class="bg-slate-900 text-xl font-bold text-white border-b-2 border-amber-500/30 focus:border-amber-500 px-2 py-1 rounded w-full md:w-96 transition-colors">
+            </div>
+            <div class="map-viewport shadow-2xl border-slate-900" id="viewport">
+                <div id="marker-layer"></div>
+                <img id="map-img" src="" alt="Campaign Map">
+            </div>
+            <div class="flex justify-between mt-3 px-2 no-export">
+                <p class="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Click Hex to Add Landmark</p>
+                <p id="coord-display" class="text-[10px] text-amber-600 font-mono">0, 0</p>
+            </div>
+        </div>
+
+        <div id="empty-state" class="bg-slate-900 border-2 border-dashed border-slate-800 rounded-2xl p-24 text-center">
+            <p class="text-slate-500 text-lg font-medium italic">Upload a map image or open one from your library to begin.</p>
+        </div>
+
+        <section id="legend-section" class="hidden">
+            <div id="legend-container" class="space-y-8"></div>
+        </section>
+    </div>
+
+    <!-- Library Modal -->
+    <div id="library-modal" class="modal-overlay hidden no-export">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+                <h2 class="text-xl font-bold uppercase tracking-widest text-amber-500">Saved Map Library</h2>
+                <button id="close-library" class="text-slate-400 hover:text-white text-2xl">✕</button>
+            </div>
+            <div id="library-list" class="p-6 overflow-y-auto space-y-4">
+                <!-- Saves will appear here -->
+            </div>
+            <div class="p-6 bg-slate-950/50 border-t border-slate-800 text-center">
+                <p class="text-xs text-slate-500">All data is stored locally in your browser cache.</p>
+            </div>
+        </div>
+    </div>
+
+    <script id="app-logic">
+        const CATEGORIES = ["Myths", "Holdings", "Dwellings", "Sanctums", "Monuments", "Hazards", "Curses", "Ruins"];
+        const mapUpload = document.getElementById('map-upload');
+        const viewport = document.getElementById('viewport');
+        const mapImg = document.getElementById('map-img');
+        const markerLayer = document.getElementById('marker-layer');
+        const legendContainer = document.getElementById('legend-container');
+        const mapArea = document.getElementById('map-area');
+        const emptyState = document.getElementById('empty-state');
+        const legendSection = document.getElementById('legend-section');
+        const coordDisplay = document.getElementById('coord-display');
+        const mapTitleInput = document.getElementById('map-title-input');
+        const libraryModal = document.getElementById('library-modal');
+        const libraryList = document.getElementById('library-list');
+
+        let landmarks = [];
+        let mapImageSrc = "";
+        let mapTitle = "Untitled Campaign";
+        let currentMapId = Date.now().toString();
+        let isExportMode = document.body.classList.contains('is-export');
+
+        window.onload = () => {
+            const embeddedData = window.__HEX_DATA;
+            const embeddedImg = window.__HEX_IMG;
+            const embeddedTitle = window.__HEX_TITLE;
+
+            if (embeddedData && embeddedImg) {
+                document.body.classList.add('is-export');
+                isExportMode = true;
+                landmarks = embeddedData;
+                mapImageSrc = embeddedImg;
+                mapTitle = embeddedTitle || "Exported Map";
+                loadMapImage(mapImageSrc);
+                refreshUI();
+            } else {
+                // Load the "active" map if one exists
+                const activeId = localStorage.getItem('activeMapId');
+                if (activeId) {
+                    loadFromLibrary(activeId);
+                }
+            }
+        };
+
+        function saveToLibrary() {
+            if (isExportMode || !mapImageSrc) return;
+            
+            const mapLibrary = JSON.parse(localStorage.getItem('hexMapLibrary') || '{}');
+            mapLibrary[currentMapId] = {
+                id: currentMapId,
+                title: mapTitleInput.value || "Untitled Campaign",
+                landmarks: landmarks,
+                image: mapImageSrc,
+                lastSaved: Date.now()
+            };
+            
+            localStorage.setItem('hexMapLibrary', JSON.stringify(mapLibrary));
+            localStorage.setItem('activeMapId', currentMapId);
+        }
+
+        function loadFromLibrary(id) {
+            const mapLibrary = JSON.parse(localStorage.getItem('hexMapLibrary') || '{}');
+            const data = mapLibrary[id];
+            if (data) {
+                currentMapId = id;
+                landmarks = data.landmarks || [];
+                mapImageSrc = data.image || "";
+                mapTitleInput.value = data.title || "Untitled Campaign";
+                loadMapImage(mapImageSrc);
+                refreshUI();
+                libraryModal.classList.add('hidden');
+                localStorage.setItem('activeMapId', id);
+            }
+        }
+
+        function deleteFromLibrary(id, event) {
+            event.stopPropagation();
+            if (!confirm("Delete this map permanently?")) return;
+            const mapLibrary = JSON.parse(localStorage.getItem('hexMapLibrary') || '{}');
+            delete mapLibrary[id];
+            localStorage.setItem('hexMapLibrary', JSON.stringify(mapLibrary));
+            if (currentMapId === id) {
+                localStorage.removeItem('activeMapId');
+                location.reload();
+            } else {
+                renderLibrary();
+            }
+        }
+
+        function renderLibrary() {
+            const mapLibrary = JSON.parse(localStorage.getItem('hexMapLibrary') || '{}');
+            const sortedKeys = Object.keys(mapLibrary).sort((a,b) => mapLibrary[b].lastSaved - mapLibrary[a].lastSaved);
+            
+            if (sortedKeys.length === 0) {
+                libraryList.innerHTML = `<p class="text-slate-500 text-center italic">No saved maps found.</p>`;
+                return;
+            }
+
+            libraryList.innerHTML = sortedKeys.map(key => {
+                const map = mapLibrary[key];
+                return `
+                <div onclick="loadFromLibrary('${map.id}')" class="bg-slate-800 hover:bg-slate-750 border border-slate-700 p-4 rounded-xl flex items-center justify-between cursor-pointer transition-all group">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 bg-slate-900 rounded border border-slate-700 overflow-hidden">
+                            <img src="${map.image}" class="w-full h-full object-cover opacity-50">
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-slate-100">${map.title}</h3>
+                            <p class="text-[10px] text-slate-500 uppercase tracking-wider">${map.landmarks.length} Landmarks • Saved ${new Date(map.lastSaved).toLocaleDateString()}</p>
+                        </div>
+                    </div>
+                    <button onclick="deleteFromLibrary('${map.id}', event)" class="text-slate-600 hover:text-red-500 p-2 transition-colors">
+                        ✕
+                    </button>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function loadMapImage(src) {
+            mapImg.src = src;
+            mapImageSrc = src;
+            mapImg.onload = () => {
+                mapArea.classList.remove('hidden');
+                legendSection.classList.remove('hidden');
+                emptyState.classList.add('hidden');
+            };
+        }
+
+        mapTitleInput.addEventListener('input', () => {
+            mapTitle = mapTitleInput.value;
+            saveToLibrary();
+        });
+
+        if (mapUpload) {
+            mapUpload.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const src = event.target.result;
+                    mapImageSrc = src;
+                    loadMapImage(src);
+                    saveToLibrary();
+                };
+                reader.readAsDataURL(file);
+            };
+        }
+
+        viewport.addEventListener('click', (e) => {
+            if (isExportMode) return;
+            if (e.target.closest('.hex-pin') || !mapImg.src) return;
+            const rect = mapImg.getBoundingClientRect();
+            addLandmark(Math.round(e.clientX - rect.left), Math.round(e.clientY - rect.top));
+        });
+
+        viewport.addEventListener('mousemove', (e) => {
+            if (!mapImg.src || isExportMode) return;
+            const rect = mapImg.getBoundingClientRect();
+            coordDisplay.innerText = `${Math.round(e.clientX - rect.left)}, ${Math.round(e.clientY - rect.top)}`;
+        });
+
+        function addLandmark(x, y) {
+            const id = landmarks.length > 0 ? Math.max(...landmarks.map(l => l.id)) + 1 : 1;
+            landmarks.push({ x, y, id, name: "", desc: "", category: "Ruins" });
+            refreshUI();
+            saveToLibrary();
+        }
+
+        function refreshUI() {
+            markerLayer.innerHTML = '';
+            legendContainer.innerHTML = '';
+            landmarks.forEach(renderMarker);
+            CATEGORIES.forEach(cat => {
+                const items = landmarks.filter(l => l.category === cat);
+                if (items.length > 0) renderCategoryGroup(cat, items);
+            });
+        }
+
+        function renderMarker(l) {
+            const pin = document.createElement('div');
+            pin.className = `hex-pin cat-${l.category.toLowerCase()}`;
+            pin.style.left = `${l.x}px`;
+            pin.style.top = `${l.y}px`;
+            pin.innerText = l.id;
+            pin.id = `pin-${l.id}`;
+            pin.onclick = () => {
+                const row = document.getElementById(`row-${l.id}`);
+                if (row) {
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    row.classList.add('row-highlight');
+                    setTimeout(() => row.classList.remove('row-highlight'), 2000);
+                }
+            };
+            markerLayer.appendChild(pin);
+        }
+
+        function renderCategoryGroup(category, items) {
+            const section = document.createElement('div');
+            section.className = "bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-xl";
+            const headerColor = `cat-${category.toLowerCase()}`;
+            
+            let rowsHtml = items.map(l => `
+                <tr id="row-${l.id}" class="hover:bg-slate-800/30 transition-colors group border-b border-slate-800 last:border-0">
+                    <td class="px-6 py-4 font-black text-amber-500 font-mono text-sm w-16">${l.id.toString().padStart(2, '0')}</td>
+                    <td class="px-6 py-4 w-64">
+                        ${isExportMode ? 
+                            `<div class="text-white text-sm font-bold">${l.name || 'Unnamed Landmark'}</div>` :
+                            `<input type="text" value="${l.name}" placeholder="Name of ${category}..." 
+                                class="bg-transparent text-white w-full text-sm font-bold"
+                                oninput="updateLandmark(${l.id}, 'name', this.value)">`
+                        }
+                    </td>
+                    <td class="px-6 py-4">
+                        ${isExportMode ? 
+                            `<div class="text-slate-300 text-sm whitespace-pre-wrap">${l.desc || 'No description provided.'}</div>` :
+                            `<textarea placeholder="Write lore..." 
+                                class="bg-transparent text-slate-300 w-full text-sm h-8 focus:h-20 resize-none py-1 overflow-hidden"
+                                oninput="updateLandmark(${l.id}, 'desc', this.value)">${l.desc}</textarea>`
+                        }
+                    </td>
+                    <td class="px-6 py-4 w-40 no-export">
+                        <select onchange="updateLandmark(${l.id}, 'category', this.value)" class="bg-slate-800 text-[10px] uppercase font-bold p-1 rounded border border-slate-700 w-full cursor-pointer">
+                            ${CATEGORIES.map(c => `<option value="${c}" ${c === category ? 'selected' : ''}>${c}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td class="px-6 py-4 text-right no-export w-12">
+                        <button onclick="removeLandmark(${l.id})" class="text-slate-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">✕</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            section.innerHTML = `
+                <div class="px-6 py-3 font-black text-[10px] uppercase tracking-[0.2em] text-white ${headerColor}">${category}</div>
+                <table class="w-full text-left border-collapse">
+                    <tbody class="divide-y divide-slate-800">${rowsHtml}</tbody>
+                </table>
+            `;
+            legendContainer.appendChild(section);
+        }
+
+        window.updateLandmark = (id, key, val) => {
+            const l = landmarks.find(item => item.id === id);
+            if (l) {
+                l[key] = val;
+                saveToLibrary();
+                if (key === 'category') refreshUI();
+            }
+        };
+
+        window.removeLandmark = (id) => {
+            landmarks = landmarks.filter(l => l.id !== id);
+            refreshUI();
+            saveToLibrary();
+        };
+
+        // UI Events
+        document.getElementById('open-library').onclick = () => {
+            renderLibrary();
+            libraryModal.classList.remove('hidden');
+        };
+
+        document.getElementById('close-library').onclick = () => {
+            libraryModal.classList.add('hidden');
+        };
+
+        document.getElementById('export-html').onclick = () => {
+            const mapData = JSON.stringify(landmarks);
+            const mapImgData = mapImg.src;
+            const title = mapTitleInput.value;
+            
+            const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>${title} - Interactive Hex Map</title>
+    <script>
+        window.__HEX_DATA = ${mapData};
+        window.__HEX_IMG = "${mapImgData}";
+        window.__HEX_TITLE = "${title}";
+    <\/script>
+    ${document.head.innerHTML}
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans pb-20 is-export">
+    ${document.body.innerHTML}
+</body>
+</html>`;
+
+            const blob = new Blob([fullHtml], { type: 'text/html' });
+            const link = document.createElement('a');
+            link.download = `${title.replace(/\s+/g, '_')}_Interactive.html`;
+            link.href = URL.createObjectURL(blob);
+            link.click();
+        };
+
+        document.getElementById('clear-all').onclick = () => {
+            if (confirm("Start a new map? Your current map is safely stored in your library.")) {
+                localStorage.removeItem('activeMapId');
+                location.reload();
+            }
+        };
+
+        // Auto-save on click away or close
+        window.onblur = saveToLibrary;
+    </script>
+</body>
+</html>
